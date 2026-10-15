@@ -1,0 +1,27 @@
+# Data and model inputs (kept locally, not versioned)
+P_RRL_data/
+PRRL_outputs/
+models/
+*.npz
+*.npy
+*.p
+*.pkl
+*.dat
+Omega_HI.txt
+array_data.txt
+bias_21.txt
+bias_rrl.txt
+carbon_tau_combined.txt
+
+# Figures and plot outputs
+figures/
+*.png
+*.pdf
+
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
