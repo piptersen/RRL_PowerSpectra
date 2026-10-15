@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
+from scipy import interpolate
 
 def rest_freq(n):
     '''
@@ -25,6 +26,16 @@ def freq_z(nu_emit, z):
     '''
     return(nu_emit/(1+z))
 
+def omega_xhi(z_21):
+    file_path = 'Omega_HI.txt'
+    #10.3847/1538-4357/aadba0
+    data = np.loadtxt(file_path)
+    
+    z_interp = data[:, 0]
+    omegaHI_interp = data[:, 1]
+
+    model = interpolate.interp1d(z_interp, omegaHI_interp, fill_value="extrapolate")
+    return(model(z_21))
 
 def meanT_shifted(tau_L, N_HII, nu_emit, linewidth, bandwidth, z):
     '''
@@ -43,7 +54,11 @@ def meanT_shifted(tau_L, N_HII, nu_emit, linewidth, bandwidth, z):
     '''
     E_SFR = madauFit(z)
     nu_shift = freq_z(nu_emit, z)
-    T_L = 0.0000509244 * (E_SFR / 0.1) * ((tau_L * N_HII) / 0.1) * (nu_shift / 150)**(-2.8) * (linewidth / 20) * ((1+z)/3)**(-2.3)
+    #E_SFR = 0.1
+    #T_L = 0.00014 * (E_SFR / 0.1) * ((tau_L * N_HII) / 0.1) * (nu_shift / 150)**(-2.8) * (linewidth / 20) * ((1+z)/3)**(-2.3)
+    #T_L = 0.000347077 * (E_SFR / 0.1) * ((tau_L * N_HII) / 0.1) * (nu_shift / 150)**(-2.8) * (linewidth / 20) * (1+z)**(-2.3)
+    #T_L = 5.3e-5 * (E_SFR / 0.1) * ((tau_L * N_HII) / 0.1) * (nu_shift / 150)**(-2.8) * (linewidth / 20) * ((1+z)/3)**(-2.3)
+    T_L = 1.8e-6 * (E_SFR / 0.1) * ((tau_L * N_HII) / 0.1) * (nu_shift / 500)**(-2.8) * (linewidth / 20) * ((1+z)/3)**(-2.3)
     return(T_L)
 
 
@@ -61,10 +76,36 @@ def madauFit(z):
 
 #Returns the 21cm brightness temperature in Kelvin from a homogeneous universe with xHI=0.01
 def T21(z, xHI = .01): #xHI chooses expectation of post reioniation if not specified
-    return 0.009*(1+z)**(1/2)*xHI  #eqn 18 in https://arxiv.org/pdf/astro-ph/0608032
-    
+    #return 0.009*(1+z)**(1/2)*xHI  #eqn 18 in https://arxiv.org/pdf/astro-ph/0608032
+    h = 0.7
+    Omega_b = 0.0456
+    Omega_xhi = omega_xhi(z)
+    xHI = Omega_xhi / Omega_b
+    return 0.084/1e3 * ((1+z)**2 * h)/(np.sqrt(0.27*(1+z)**3 + 0.73)) * (Omega_b / 0.044) * (xHI / 0.01) #https://arxiv.org/pdf/1108.1474
+    #return 0.084/1e6 * ((1+z)**2 * h)/(np.sqrt(0.27*(1+z)**3 + 0.73)) * (Omega_b / 0.044) * (0.008*(1+z) / 0.01) #https://arxiv.org/pdf/1108.1474
+def tau_test(T, EM, n, bbeta):
+    chi = 1.58e5 / (T * ((n+2)**2))
+    return(2.046e6 * np.exp(chi)* (T**(-5/2)) * EM * bbeta * 1e-6)
+def beta_n(nu, b, n, T):
+    h = 6.6261e-27
+    k = 1.3807e-16
+    bn = b
+    bn_p = np.roll(b, -1)
+    numer = (1 - ((bn_p / bn)*np.exp(-((h*nu) / (k*T)))))
+    den = (1 - (np.exp(-((h*nu) / (k*T)))))
+    return (numer / den)
+def complexTau(nu, n):
+    data = (np.hstack(np.loadtxt('13_83_A_C_F.dat', skiprows=2)))
+    b = data[1::2]
+    n_spacing = np.array(data[0::2]).astype(int)
+    b_model = interpolate.interp1d(n_spacing, b, fill_value="extrapolate")
+    b_out = b_model(n_spacing)
+    beta = beta_n(nu, b_out, n_spacing, 8e3)
+    tau = tau_test(8e3, 1, n_spacing[:-1], beta[:-1]*b_model(n_spacing)[:-1])
+    normal_tau = 0.1 * tau / np.max(np.abs(tau))
+    return(normal_tau[n+2])
 
-def aFcn(nu, z_min, z_max, N = 10_000, n_min = 1, n_max = 450):
+def aFcn(nu, z_min, z_max, n_min = 1, n_max = 450, tau_new=0.1):
     '''
     Base 'analytical' calculation function:
     Underlying function takes single frequency and calculates total temperature contamination (from all n) at that frequency. Steps of this calculation are as follows:
@@ -80,7 +121,6 @@ def aFcn(nu, z_min, z_max, N = 10_000, n_min = 1, n_max = 450):
     returns [K] (float) : Total RRL temperature at frequency, nu
     '''
     
-    z_space = np.linspace(z_min, z_max, N)
     n_range = np.arange(n_min, n_max, 1)
     
     #Find rest frame frequency for each n transition
@@ -93,7 +133,11 @@ def aFcn(nu, z_min, z_max, N = 10_000, n_min = 1, n_max = 450):
     z_mask = (z_contam >= 0) & (z_contam <= 6)
 
     #Calculates temperature for each transition
-    temp_line = meanT_shifted(1e-1, 1, nu_emitted, 20, 1, z_contam)
+    #print('t1', tau_test)
+    #tau_new = complexTau(nu, n_range)
+
+    #print('t2', tau_test)
+    temp_line = meanT_shifted(tau_new, 1, nu_emitted, 20, 1, z_contam)
     
     #Masks out transitions that fall outside of z = (0,6) band
     temp_line = np.where(z_mask, temp_line, 0)
